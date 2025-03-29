@@ -1,0 +1,81 @@
+---
+title: "Day1_pre-analyses_Stroop_2022-01-30"
+author: "ML"
+date: "1/30/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(plyr)
+library(tidyverse) #load dplyr & readr
+```
+
+# Pre-analyses data cleaning
+
+## Combining the files
+
+```{r setDF}
+
+d1df_data <- list.files(path = "./Multiplication1",    
+                       pattern = "*.csv", full.names = TRUE) %>% 
+  lapply(read_csv) %>%                                           
+  bind_rows %>% 
+  write_csv("2022-01-30_day1_data-combined.csv")
+
+# no of participants
+
+test<- d1df_data %>% select(participant) %>% unique()
+```
+
+## Data Wrangling
+### Summary
+
+```{r dataframe1}
+
+# Typing Task
+
+typingdf <- d1df_data %>% 
+  select(participant, typedStimulus, typingRT1, typingCorr) %>% 
+  filter(typingCorr != "NA")
+
+
+multiplydf <- d1df_data %>% 
+  select(participant, answers, typingRT, multiplyCorr) %>% 
+  filter(multiplyCorr != "NA")
+
+```
+
+### Summary
+
+```{r dfsummary1}
+
+avgTyping <- typingdf %>% 
+  filter(typingCorr == 1) %>% 
+  group_by(participant) %>% 
+  summarise(avgTypingRT = mean(typingRT1))
+
+multiplyFluency <- multiplydf %>% 
+  filter(multiplyCorr == 1) %>% 
+  group_by(participant) %>% 
+  summarise(totalCorr = sum(multiplyCorr))
+
+comb_typingFluency <- avgTyping %>% 
+  inner_join(multiplyFluency, by = c("participant"))
+```
+
+## lme
+
+```{r corr}
+
+pairs()
+
+```
+
+```{r lme}
+
+
+
+```
+

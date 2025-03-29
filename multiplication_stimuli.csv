@@ -1,0 +1,65 @@
+﻿multliplyProblem,Presentation Order,Problem_size,Inteference score,Interference group
+2 × 2,tie,small-sized,0,low interference
+2 × 3,small first,small-sized,0,low interference
+2 × 4,small first,small-sized,1,low interference
+2 × 5,small first,small-sized,0,low interference
+2 × 6,small first,small-sized,3,low interference
+2 × 7,small first,small-sized,4,low interference
+2 × 8,small first,small-sized,7,low interference
+2 × 9,small first,small-sized,7,low interference
+3 × 2,large first,small-sized,0,low interference
+3 × 3,tie,small-sized,0,low interference
+3 × 4,small first,small-sized,10,high interference
+3 × 5,small first,small-sized,2,low interference
+3 × 6,small first,small-sized,8,high interference
+3 × 7,small first,small-sized,13,high interference
+3 × 8,small first,small-sized,13,high interference
+3 × 9,small first,large-sized,9,high interference
+4 × 2,large first,small-sized,1,low interference
+4 × 3,large first,small-sized,10,high interference
+4 × 4,tie,small-sized,5,low interference
+4 × 5,small first,small-sized,8,high interference
+4 × 6,small first,small-sized,12,high interference
+4 × 7,small first,large-sized,17,high interference
+4 × 8,small first,large-sized,25,high interference
+4 × 9,small first,large-sized,9,high interference
+5 × 2,large first,small-sized,0,low interference
+5 × 3,large first,small-sized,2,low interference
+5 × 4,large first,small-sized,8,high interference
+5 × 5,tie,small-sized,5,low interference
+5 × 6,small first,large-sized,6,low interference
+5 × 7,small first,large-sized,7,low interference
+5 × 8,small first,large-sized,9,high interference
+5 × 9,small first,large-sized,6,low interference
+6 × 2,large first,small-sized,3,low interference
+6 × 3,large first,small-sized,8,high interference
+6 × 4,large first,small-sized,12,high interference
+6 × 5,large first,large-sized,6,low interference
+6 × 6,tie,small-sized,5,low interference
+6 × 7,small first,large-sized,22,high interference
+6 × 8,small first,large-sized,11,high interference
+6 × 9,small first,large-sized,13,high interference
+7 × 2,large first,small-sized,4,low interference
+7 × 3,large first,small-sized,13,high interference
+7 × 4,large first,large-sized,17,high interference
+7 × 5,large first,large-sized,7,low interference
+7 × 6,large first,large-sized,22,high interference
+7 × 7,tie,large-sized,7,low interference
+7 × 8,small first,large-sized,9,high interference
+7 × 9,small first,large-sized,17,high interference
+8 × 2,large first,small-sized,7,low interference
+8 × 3,large first,small-sized,13,high interference
+8 × 4,large first,large-sized,25,high interference
+8 × 5,large first,large-sized,9,high interference
+8 × 6,large first,large-sized,11,high interference
+8 × 7,large first,large-sized,9,high interference
+8 × 8,tie,large-sized,19,high interference
+8 × 9,small first,large-sized,19,high interference
+9 × 2,large first,small-sized,7,low interference
+9 × 3,large first,large-sized,9,high interference
+9 × 4,large first,large-sized,9,high interference
+9 × 5,large first,large-sized,6,low interference
+9 × 6,large first,large-sized,13,high interference
+9 × 7,large first,large-sized,17,high interference
+9 × 8,large first,large-sized,19,high interference
+9 × 9,tie,large-sized,19,high interference

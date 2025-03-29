@@ -1,0 +1,329 @@
+---
+title: "Data Cleaning"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(openxlsx)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(tidyverse)
+```
+
+## Import Data from Day 1
+
+```{r}
+
+# Specify the folder path
+folder_path <- "DATA_raw/Multiplication1/"
+
+# List all CSV files in the specified folder
+file_list <- list.files(path = folder_path, pattern = "*.csv", full.names = TRUE)
+
+# Read and combine all CSV files, specifying all columns as character to avoid type conflicts
+combined_df1 <- file_list |>
+  map_dfr(~ read_csv(.x, col_types = cols(.default = "c")))|>
+  select(windowSize, TypedAnswer1, typingRT1, typingCorr, typedStimulus, 
+         participant, date, expName, frameRate, TypT_answer, typingRT, multiplyCorr, 
+         problem, answers)|>
+    mutate(
+    # Convert windowSize
+    windowSize = as.character(windowSize),
+    # Convert numeric or char columns
+    TypedAnswer1 = as.character(TypedAnswer1),
+    typingRT1 = as.numeric(typingRT1),
+    typingCorr = as.integer(typingCorr),  # If binary (1 or 0) 
+    typedStimulus = as.character(typedStimulus),
+    frameRate = as.numeric(frameRate),
+    # Participant ID as a factor
+    participant = as.factor(participant),
+    # Convert date to year-month-day format
+    date = ymd(str_sub(date, 1, 10)),
+    # Leave expName as character 
+    expName = as.character(expName),
+    # Others
+    TypT_answer = as.character(TypT_answer),
+    typingRT = as.numeric(typingRT),
+    multiplyCorr = as.integer(multiplyCorr), #binary(0, 1)
+    problem = as.character(problem),
+    answers = as.character(answers)
+  )
+
+
+```
+
+## Import Data from Day 2
+
+```{r}
+
+# Specify the folder path
+folder_path <- "DATA_raw/Multiplication2/"
+
+# List all CSV files in the specified folder
+file_list <- list.files(path = folder_path, pattern = "*.csv", full.names = TRUE)
+
+# Read and combine all CSV files, specifying all columns as character to avoid type conflicts
+combined_df2 <- file_list %>%
+  map_dfr(~ read_csv(.x, col_types = cols(.default = "c")))|>
+  select(participant, date, expName, frameRate,
+         rt_resp_4.corr, rt_resp_4.rt, 
+         Condition,
+         ct_keyResp.corr, ct_keyResp.rt,
+         displayProblem, Dims, numDistance, #physical size
+         multi_RT, multiplyCorr, 
+         multliplyProblem, physicalSize, orderOperand,
+         multp_Answer, mult_answer
+         )
+```
+
+### 
+
+## Typing Performance
+
+```{r}
+# Calculate typing performance metrics
+typing_performance <- combined_df1 |>
+  select(participant, date, typingRT1, typingCorr)|>
+  filter(!is.na(typingRT1))|>
+  group_by(participant, date) |>
+  summarise(
+    # Total number of trials per participant
+    total_trial_typing = n(),    
+    # Count of correct responses
+    num_correct_responses_typing = sum(typingCorr == 1, na.rm = TRUE), 
+    # Mean RT for correct responses
+    mean_RT_correct_typing = mean(typingRT1[typingCorr == 1], na.rm = TRUE), 
+    # Median RT for correct responses
+    median_RT_correct_typing = median(typingRT1[typingCorr == 1], na.rm = TRUE), 
+    # SD of RT for correct responses
+    sd_RT_correct_typing = sd(typingRT1[typingCorr == 1], na.rm = TRUE),
+    #percentaage accuracy
+    percentage_accuracy_typing = (num_correct_responses_typing/62*100)
+  )
+```
+
+## Multiplication Fluency
+
+Number of correct responses within 90seconds
+
+```{r}
+
+fluency_score <- combined_df1 |>
+  select(participant, typingRT, multiplyCorr)|>
+  filter(!is.na(typingRT))|>
+  group_by(participant)|>
+  summarise(
+    total_trials_fluency = n(),
+    total_solved_fluency = sum(multiplyCorr == 1, na.rm = TRUE), 
+    accuracy_rate_fluency = total_solved_fluency /60 , #total questions provided
+    mean_RT_fluency = mean(typingRT[multiplyCorr == 1], na.rm = TRUE), 
+    median_RT_fluency = median(typingRT[multiplyCorr == 1], na.rm = TRUE), 
+    sd_RT_fluency = sd(typingRT[multiplyCorr == 1], na.rm = TRUE),
+    # Optional combined fluency score: Adjust for both speed and accuracy
+    combined_fluency_score = accuracy_rate_fluency / median_RT_fluency  
+  )
+```
+
+## Processing Speed Test
+
+The task asks the participants to respond left and right, and we measure the rate of response to left and right arrow.
+
+```{r}
+
+response_speed <- combined_df2|>
+  select(participant, rt_resp_4.corr, rt_resp_4.rt)|>
+  mutate(rt_resp_4.rt = as.numeric(rt_resp_4.rt)) |>
+  mutate(rt_resp_4.corr = as.numeric(rt_resp_4.corr)) |>
+  filter(!is.na(rt_resp_4.rt))|>
+  group_by(participant)|>
+  summarise(
+    total_trials_speed = n(),
+    total_solved_speed = sum(rt_resp_4.corr == 1, na.rm = TRUE), 
+    accuracy_rate_speed = total_solved_speed /64 , 
+    mean_RT_speed = mean(rt_resp_4.rt[rt_resp_4.corr == 1], na.rm = TRUE), 
+    median_RT_speed = median(rt_resp_4.rt[rt_resp_4.corr == 1], na.rm = TRUE), 
+    sd_RT_speed = sd(rt_resp_4.rt[rt_resp_4.corr == 1], na.rm = TRUE),
+    # Optional combined fluency score: Adjust for both speed and accuracy
+    combined_speed_score = accuracy_rate_speed / median_RT_speed  
+  )
+  
+```
+
+## Numerical Comparison
+
+### Magnitude
+
+```{r}
+
+to_remove_list <- c(676, 761, 794, 657, 832, 653, 658, 749, 819, 674, 748, 739, 732, 680, 755, 817)
+
+magnitude_stroop <- combined_df2 |>
+  select(participant, Condition:numDistance) |>
+  filter(!is.na(numDistance)) |>
+  rename(
+    participant = participant,
+    condition = Condition,
+    correctness = ct_keyResp.corr,
+    rt = ct_keyResp.rt,
+    problem = displayProblem,
+    congruency = Dims,
+    num_distance = numDistance
+  ) |>
+  mutate(condition = str_remove_all(condition, "stimulusFile/|\\.xlsx"))|>
+    filter(condition == "magnitude")|>
+  mutate(
+    participant = as.factor(participant),
+    condition = as.factor(condition),
+    correctness = as.numeric(correctness),
+    rt = as.numeric(rt),
+    problem = as.factor(problem),
+    congruency = as.factor(congruency),
+    num_distance = as.factor(num_distance)
+  )|>
+  write_csv("DATA_cleaned/mag_stroop_df.csv")
+```
+
+summary for magnitude task
+
+```{r}
+
+to_remove_list <- c(676, 761, 794, 657, 832, 653, 658, 749, 819, 674, 748, 739, 732, 680, 755, 817)
+
+mag_summary <- magnitude_stroop |>
+  filter(!participant %in% to_remove_list) |>
+  group_by(participant)|>
+  summarise(
+    total_trials_mag = n(),
+    total_solved_mag = sum(correctness == 1, na.rm = TRUE), 
+    accuracy_rate_mag = total_solved_mag /72 , 
+    mean_RT_mag = mean(rt[correctness == 1], na.rm = TRUE), 
+    median_RT_mag = median(rt[correctness == 1], na.rm = TRUE), 
+    sd_RT_mag = sd(rt[correctness == 1], na.rm = TRUE)
+  )|>
+  write_csv("DATA_cleaned/mag_summary.csv")
+```
+
+### Physical Size
+
+```{r}
+
+size_stroop <- combined_df2 |>
+  select(participant, Condition:numDistance) |>
+  filter(!is.na(numDistance)) |>
+  rename(
+    participant = participant,
+    condition = Condition,
+    correctness = ct_keyResp.corr,
+    rt = ct_keyResp.rt,
+    problem = displayProblem,
+    congruency = Dims,
+    num_distance = numDistance
+  ) |>
+    mutate(condition = str_remove_all(condition, "stimulusFile/|\\.xlsx"))|>
+  filter(condition == "physical")|>
+  mutate(
+    participant = as.factor(participant),
+    condition = as.factor(condition),
+    correctness = as.numeric(correctness),
+    rt = as.numeric(rt),
+    problem = as.factor(problem),
+    congruency = as.factor(congruency),
+    num_distance = as.factor(num_distance)
+  )|>
+  write_csv("DATA_cleaned/size_stroop_df.csv")
+```
+
+summary for physical size task
+
+```{r}
+
+size_summary <- size_stroop |>
+  group_by(participant)|>
+  summarise(
+    total_trials_size = n(),
+    total_solved_size = sum(correctness == 1, na.rm = TRUE), 
+    accuracy_rate_size = total_solved_size /72 , 
+    mean_RT_size = mean(rt[correctness == 1], na.rm = TRUE), 
+    median_RT_size = median(rt[correctness == 1], na.rm = TRUE), 
+    sd_RT_size = sd(rt[correctness == 1], na.rm = TRUE)
+  )
+```
+
+## Multiplication Stroop (Production)
+
+```{r}
+
+mult_stroop <- combined_df2|>
+  select(participant, multi_RT:mult_answer)|>
+  filter(!is.na(physicalSize))|>
+  mutate(
+    participant = as.factor(participant),
+    multp_Answer = as.factor(multp_Answer),
+    multiplyCorr = as.numeric(multiplyCorr),
+    multi_RT = as.numeric(multi_RT),
+    multliplyProblem = as.factor(multliplyProblem),
+    physicalSize = as.factor(physicalSize),
+    orderOperand = as.factor(orderOperand)
+  )|>
+  write_csv("DATA_cleaned/mult_stroop_df.csv")
+
+```
+
+summary of multiplication stroop
+
+```{r}
+mult_summary <- mult_stroop |>
+  group_by(participant)|>
+   summarise(
+    total_trials_mult = n(),
+    total_solved_mult = sum(multiplyCorr == 1, na.rm = TRUE), 
+    accuracy_rate_mult = total_solved_mult /216 , 
+    mean_RT_mult = mean(multi_RT[multiplyCorr == 1], na.rm = TRUE), 
+    median_RT_mult = median(multi_RT[multiplyCorr == 1], na.rm = TRUE), 
+    sd_RT_mult = sd(multi_RT[multiplyCorr == 1], na.rm = TRUE)
+  )
+```
+
+## Screening Task Performance
+
+```{r}
+to_remove_list <- c(676, 761, 794, 657, 832, 653, 658, 749, 819, 674, 748, 739, 732, 680, 755, 817)
+
+screening_df <- fluency_score |>
+  full_join(typing_performance, by = c('participant'))|>
+  full_join(response_speed, by = c('participant'))|>
+  filter(percentage_accuracy_typing > 50) |>
+  filter(!is.na(mean_RT_speed))|>
+  write_csv("DATA_cleaned/screening_cleaning.csv")
+```
+
+## Combine the Screening Task with Demographics
+
+```{r}
+#| message: false
+#| warning: false
+
+demo <- read_csv("DATA_cleaned/demo_cleaned.csv")
+
+demo_screening <- screening_df|>
+  inner_join(demo, by = c('participant'))|>
+  inner_join(size_summary, by = c('participant'))|>
+  inner_join(mult_summary, by = c('participant'))|>
+  write_csv("DATA_cleaned/combined_df.csv")
+
+
+reduced_df <- demo_screening |>
+    inner_join(mag_summary, by = c('participant'))
+```
+
+## 

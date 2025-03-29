@@ -1,0 +1,746 @@
+---
+title: "Data Cleaning"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(MuMIn)
+library(viridis) 
+```
+
+## Import Data
+
+```{r}
+#| message: false
+
+size_stroop <- read_csv("DATA_cleaned/size_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mag_stroop <- read_csv("DATA_cleaned/mag_stroop_df.csv") |>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mult_stroop <- read_csv("DATA_cleaned/mult_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(multiplyCorr),
+         congruency = as.factor(physicalSize),
+         size = if_else(mult_answer < 25, "small-sized", "large-sized"),
+         operand_order = as.factor(orderOperand),
+         problem = as.factor(multliplyProblem),
+         log_rt = log10(multi_RT))
+
+demo_screening <- read_csv("DATA_cleaned/combined_df.csv")|>
+  mutate(participant = as.factor(participant))
+
+mag_summary <- read_csv("DATA_cleaned/mag_summary.csv")|>
+  mutate(participant = as.factor(participant))
+
+reduced_df <- demo_screening |>
+    inner_join(mag_summary, by = c('participant'))
+```
+
+## Data structure
+
+```{r}
+
+size_stroop_df <- size_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+  select(-Progress:-sd_RT_mult)|>
+  mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE))|>
+  filter(correctness == TRUE)
+
+mag_stroop_df <- mag_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+    select(-Progress:-sd_RT_mult)|>
+    mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE),
+         motorspeed_centered = median_RT_speed - mean(median_RT_speed, na.rm = TRUE))|>
+    filter(correctness == TRUE)
+```
+
+## Multilevel - Magnitude (Congruency & Intentional Processing)
+
+### RT
+
+#### Maximal model
+
+We start with maximal model.
+
+```{r}
+# start with max model with log-transformed RT
+
+
+model_mag1 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency * num_distance | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag1)
+
+```
+
+We ran into singularity/ model failed to converge. So, we need to decide which random effect to remove.
+
+```{r}
+isSingular(model_mag1)
+
+# View the variance-covariance matrix
+VarCorr(model_mag1)
+```
+
+#### Simplified model 2
+
+```{r}
+
+model_mag2 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency * num_distance || participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag2)
+
+```
+
+```{r}
+summary(model_mag2)$varcor 
+```
+
+#### Simplified model 3
+
+```{r}
+
+model_mag3 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency + num_distance | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag3)
+```
+
+#### Simplified model 4
+
+We proceed to simplify the model
+
+```{r}
+model_mag4 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency + num_distance || participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag4)
+```
+
+#### Simplified model 5 & 6
+
+Model 5 - congruency random effect
+
+```{r}
+model_mag5 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag5)
+performance::check_collinearity(model_mag5)
+performance::model_performance(model_mag5)
+
+```
+
+Model 6 - numerical distance random effect
+
+```{r}
+model_mag6 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 +  num_distance | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag6)
+```
+
+Model 7 - null model
+
+```{r}
+model_mag7 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1  | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag7)
+anova(model_mag7, model_mag5)
+```
+
+Model 8 - adding in the individual motor speed as predictors (motorspeed_centered)
+
+```{r}
+model_mag8 <- lmer(log_rt ~ congruency * num_distance * fluency_centered + 
+                     motorspeed_centered+
+                     (1  | participant) + (1| problem), 
+                   data = mag_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_mag8)
+anova(model_mag8, model_mag5)
+```
+
+### Model 5 - final
+
+#### Estimated marginal means
+
+```{r}
+emm_options(pbkrtest.limit = 100000)
+
+# Estimated marginal means for congruency
+emmeans_congruency <- emmeans(model_mag5, ~ congruency)
+print(emmeans_congruency)
+pairs(emmeans_congruency)
+
+# Estimated marginal means for numerical distance
+emmeans_num_distance <- emmeans(model_mag5, ~ num_distance)
+print(emmeans_num_distance)
+pairs(emmeans_num_distance)
+
+# Interaction effects
+emmeans_congruency_numdist <- emmeans(model_mag5, ~ congruency * num_distance)
+print(emmeans_congruency_numdist)
+
+# Pairwise comparisons
+pairs(emmeans_congruency_numdist)
+
+```
+
+#### EMM - Data Viz
+
+How numerical distance affect congruency?
+
+```{r}
+emmeans_df <- as.data.frame(emmeans_congruency_numdist)
+
+# Ensure 'num_distance' is treated as a factor (if it's not already)
+emmeans_df$num_distance <- factor(emmeans_df$num_distance)
+
+# Create the plot
+p <- ggplot(emmeans_df, aes(x = num_distance, y = emmean, 
+                            group = congruency, color = congruency)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), 
+                width = 0.1, size = 0.8) +
+  scale_color_viridis_d(option = "viridis", end = 0.8) +  # Apply color-blind friendly palette
+  labs(
+       x = "Numerical Distance", 
+       y = "Estimated Marginal Mean of Log Reaction Time",
+       color = "Congruency") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+
+p 
+ggsave("figures/interaction_mag.png", plot = p, width = 8, height = 6, dpi = 300)
+
+```
+
+How fluency affect changes at different congruency?
+
+```{r}
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between congruency and fluency at selected values of fluency_centered
+emmeans_congruency_fluency <- emmeans(model_mag5, ~ congruency | fluency_centered, 
+                                      at = list(fluency_centered = fluency_vals))
+print(emmeans_congruency_fluency)
+```
+
+EMM - Data Viz\
+
+```{r}
+# Get the emmeans results as a data frame
+emmeans_df_fluency <- as.data.frame(emmeans_congruency_fluency)
+
+fluency_interaction_mag <- ggplot(emmeans_df_fluency, aes(x = fluency_centered, y = emmean, color = congruency)) +
+  geom_line(aes(group = congruency), size = 1) +  # Lines for each congruency level
+  geom_point(size = 3) +  # Points at each estimate
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) +  # Error bars
+  labs(x = "Fluency (Centered)", 
+       y = "Estimated Marginal Mean of log(RT)") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+fluency_interaction_mag
+ggsave("figures/fluency_interaction_mag.png", plot = fluency_interaction_mag, width = 12, height = 6)
+```
+
+#### Effect sizes
+
+Calculate the r-squared
+
+```{r}
+library(MuMIn)
+# Calculate marginal and conditional R²
+r_squared <- r.squaredGLMM(model_mag5)
+print(r_squared)
+```
+
+Calculate cohen's f-squared
+
+```{r}
+# Extract marginal R²
+R2_marginal <- r_squared[1]  # The first value is the marginal R²
+
+# Calculate Cohen's f² for the fixed effects
+f2_fixed <- R2_marginal / (1 - R2_marginal)
+print(f2_fixed)
+
+```
+
+#### Data Viz
+
+```{r}
+# Main Effect of Congruency (RT in ms)
+ggplot(mag_stroop_df, aes(x = congruency, y = (10^log_rt) * 1000)) +
+  stat_summary(fun = mean, geom = "bar", fill = "gray70", color = "black") +  # Bars in grayscale
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, color = "black") +  # Error bars
+  labs(x = "Congruency", y = "Response Time (ms)", title = "Main Effect of Congruency") +
+  theme_classic(base_size = 12) +  # APA-compliant theme
+  theme(
+    text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.line = element_line(color = "black"),
+    panel.grid = element_blank()
+  ) +
+  scale_y_continuous(labels = scales::comma)  # Format y-axis to show RT in ms
+
+```
+
+Note. Error bars represent ±1 standard error of the mean.
+
+Main effect for numerical distance
+
+```{r}
+# Main Effect of Numerical Distance (RT in ms)
+ggplot(mag_stroop_df, aes(x = factor(num_distance), y = (10^log_rt) * 1000)) +
+  stat_summary(fun = mean, geom = "bar", fill = "gray70", color = "black") +  # Bars in grayscale
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, color = "black") +  # Error bars
+  labs(x = "Numerical Distance", y = "Response Time (ms)", title = "Main Effect of Numerical Distance") +
+  theme_classic(base_size = 12) +  # APA-compliant theme
+  theme(
+    text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.line = element_line(color = "black"),
+    panel.grid = element_blank()
+  ) +
+  scale_y_continuous(labels = scales::comma)  # Format y-axis to show RT in ms
+
+
+```
+
+Main effect of fluency
+
+```{r}
+# 3. Main Effect of Fluency
+# Calculate IQR and filter out outliers
+Q1 <- quantile((10^mag_stroop_df$log_rt) * 1000, 0.25)
+Q3 <- quantile((10^mag_stroop_df$log_rt) * 1000, 0.75)
+IQR <- Q3 - Q1
+
+# Filter data within 1.5 * IQR range
+mag_stroop_df_clean <- mag_stroop_df %>%
+  filter((10^log_rt) * 1000 > (Q1 - 1.5 * IQR) & (10^log_rt) * 1000 < (Q3 + 1.5 * IQR))
+
+# Re-plot without outliers
+ggplot(mag_stroop_df_clean, aes(x = total_solved_fluency, y = (10^log_rt) * 1000)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "black") +
+  labs(x = "Centered Fluency Score", y = "Response Time (ms)", title = "Main Effect of Fluency on Response Time") +
+  theme_classic(base_size = 12) +
+  theme(
+    text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.line = element_line(color = "black"),
+    panel.grid = element_blank()
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+Combined
+
+```{r}
+# Adjusted data visualization to display actual RT instead of log(RT)
+mag_interaction <- ggplot(mag_stroop_df, aes(x = congruency, y = (10^log_rt) * 1000, 
+                                             fill = factor(num_distance))) +  
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(), 
+               color = "black", width = 0.6) +  # Black outlines for bars
+  stat_summary(fun.data = mean_se, geom = "errorbar", 
+               position = position_dodge(width = 0.6), width = 0.2, 
+               color = "black") +  # Error bars
+  scale_fill_brewer(palette = "Set2", 
+                    labels = c("Distance 1", "Distance 2", "Distance 5")) +  
+  labs(x = "Congruency", y = "Response Time (ms)", fill = "Numerical Distance"
+       ) +
+  theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at bottom
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+mag_interaction
+ggsave("figures/mag_interaction.png", plot = mag_interaction, width = 8, height = 6, dpi = 300)
+```
+
+### Accuracy - GLM
+
+#### Maximal model
+
+We start with maximal model.
+
+```{r}
+
+glm_mag1 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 + congruency * num_distance | participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag1)
+summary(glm_mag1)$varcor
+```
+
+#### GLM 2
+
+```{r}
+glm_mag2 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 + congruency * num_distance || participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag2)
+summary(glm_mag2)$varcor
+```
+
+#### GLM 3
+
+```{r}
+
+glm_mag3 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 + congruency + num_distance | participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag3)
+```
+
+#### GLM 4
+
+```{r}
+glm_mag4 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 + congruency + num_distance | participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag4)
+```
+
+#### GLM 5
+
+```{r}
+
+glm_mag5 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 + congruency  | participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag5)
+```
+
+#### GLM 6
+
+```{r}
+glm_mag6 <- glmer(correctness ~ congruency * num_distance + fluency_centered +
+                    (1 +  num_distance | participant), 
+                  data = mag_stroop_df, family = binomial,
+                  control = glmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 1e5)))
+
+summary(glm_mag6)
+```
+
+## Multilevel - Size
+
+### EDA
+
+```{r}
+
+library(dplyr)
+
+size_summary_df <- size_stroop_df |>
+  group_by(participant, num_distance, congruency)|>
+  summarise(n = n())
+
+size_df_noTie <- size_stroop_df |>
+  filter(num_distance != 0)
+
+```
+
+### RT
+
+#### Maximal model
+
+```{r}
+
+model_size1 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency * num_distance | participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size1)
+summary(model_size1)$varcor
+```
+
+#### Model 2
+
+```{r}
+
+model_size2 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency * num_distance || participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size2)
+summary(model_size2)$varcor
+```
+
+#### Model 3
+
+```{r}
+model_size3 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency + num_distance | participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size3)
+summary(model_size3)$varcor
+performance::check_collinearity(model_size3)
+```
+
+Note.
+
+#### Model 4
+
+```{r}
+
+model_size4 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency + num_distance || participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size4)
+```
+
+#### Model 5
+
+```{r}
+model_size5 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + congruency | participant), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size5)
+performance::model_performance(model_size5)
+```
+
+#### Model 6
+
+```{r}
+
+model_size6 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1 + num_distance | participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size6)
+```
+
+#### null model
+
+#### Model 7
+
+```{r}
+
+model_size7 <- lmer(log_rt ~ congruency * num_distance * fluency_centered +
+                     (1  | participant) + (1| problem), 
+                   data = size_df_noTie, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(model_size7)
+anova(model_size5, model_size7)
+```
+
+#### 
+
+#### 
+
+### Estimated Marginal Means
+
+```{r}
+emm_options(pbkrtest.limit = 10000)
+
+# Estimated marginal means for congruency
+emmeans_congruency <- emmeans(model_size5, ~ congruency)
+print(emmeans_congruency)
+pairs(emmeans_congruency)
+
+# Estimated marginal means for numerical distance
+emmeans_num_distance <- emmeans(model_size5, ~ num_distance)
+print(emmeans_num_distance)
+pairs(emmeans_num_distance)
+
+# Interaction effects
+emmeans_congruency_numdist <- emmeans(model_size5, ~ congruency * num_distance)
+print(emmeans_congruency_numdist)
+
+# Pairwise comparisons
+pairs(emmeans_congruency_numdist)
+```
+
+### Data Viz
+
+```{r}
+
+
+emm_df <- as.data.frame(emmeans_congruency_numdist)
+
+# Create the interaction plot
+emm_sizeInteraction <- ggplot(emm_df, aes(x = num_distance, y = emmean, 
+                   color = congruency, group = congruency)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), 
+                width = 0.1, size = 0.8) +
+  scale_color_viridis_d(option = "viridis", end = 0.8) +  # Apply color-blind friendly palette
+  labs(
+       x = "Numerical Distance", 
+       y = "Estimated Marginal Mean of Log Reaction Time",
+       color = "Congruency") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+
+
+emm_sizeInteraction
+ggsave("figures/emm_sizeInteraction.png", plot = emm_sizeInteraction, width = 8, height = 6)
+```
+
+bar plot
+
+```{r}
+
+size_interaction <- ggplot(size_df_noTie, aes(x = congruency, y = (10^log_rt) * 1000, fill = factor(num_distance))) +  # Convert to milliseconds
+  stat_summary(fun = mean, geom = "bar", position = position_dodge(), color = "black", width = 0.6) +  # Black outlines for bars
+  stat_summary(fun.data = mean_se, geom = "errorbar", position = position_dodge(width = 0.6), width = 0.2, color = "black") +  # Error bars
+  scale_fill_manual(values = c(  "lightblue", "gray70", "gray30"), 
+                    labels = c("Distance 1", "Distance 2", "Distance 5")) +  # Grayscale colors
+  labs(x = "Congruency", y = "Response Time (ms)", fill = "Numerical Distance") +
+  theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at bottom
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+size_interaction
+
+ggsave("figures/size_interaction.png", plot = size_interaction, height = 6, width = 10)
+```

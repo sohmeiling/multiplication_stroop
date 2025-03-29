@@ -1,0 +1,369 @@
+---
+title: "Data Cleaning"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(openxlsx)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(tidyverse)
+```
+
+## Import Demographics Data
+
+```{r}
+
+# Read and select columns, then remove the first row
+demo <- read.xlsx("OS2-demographics.xlsx") |>
+  select(
+    Progress,RecordedDate,
+    participant,
+    dob_1,
+    dob_2,
+    dob_3,
+    gender,
+    nationality,
+    ethnicity_1:ethnicity_7_TEXT,
+    eduLevel:lingualAbility,
+    multilingual_1:multilingual_7_TEXT,
+    mathlanguage_1:SC0
+  )|>
+  mutate_all(~ gsub('xml:space="preserve">', '', .))|>
+  filter(!is.na(participant) & participant != "") |>
+  distinct(participant, .keep_all = TRUE)|>
+  mutate(Progress = as.numeric(Progress))|>
+  dplyr::filter(Progress >= 50)|>
+  select(-nativelanguage_19_TEXT, -nativelanguage_19_TEXT, -lingualAbility)|>
+    mutate(
+    RecordedDate = as.numeric(RecordedDate), # Convert to numeric if needed
+    RecordedDate = as.Date(RecordedDate, origin = "1899-12-30") # Convert to date format
+  )
+  
+
+# Combine ethnicity columns into a single `ethnicity` column
+cleaned_demo <- demo |>
+    mutate(
+    # Convert dob_1 (month names) to numeric month values
+    dob_month = match(dob_1, month.name),
+    
+    # Create a single date column
+    date_of_birth = make_date(
+      year = as.numeric(dob_3),
+      month = dob_month,
+      day = as.numeric(dob_2)
+    )
+  ) |>
+  # Optionally drop the separate dob columns
+  select(-dob_1, -dob_2, -dob_3, -dob_month)|>
+  # calculate age
+  mutate(age = as.numeric(interval(date_of_birth, RecordedDate) / years(1))) |>
+  
+  # Combine all non-empty ethnicity responses into a single column
+  mutate(
+    ethnicity = coalesce(ethnicity_1, ethnicity_2, ethnicity_3, ethnicity_4, ethnicity_5, ethnicity_6, ethnicity_7)
+  ) |>
+  # Optionally drop the original ethnicity columns
+  select(-starts_with("ethnicity_")) |>
+  ## Recode medical history
+  mutate(
+    # Recode `medicalHistory2` to NA where `medicalHistory` is "No"
+    medicalHistory2 = ifelse(Medicalhistory == "No", NA, medicalHistory2)
+  ) |>
+  # Recode `developmentHist2` based on `developmentHist`
+  mutate(
+    developmentHist2 = ifelse(developmentHist == "No", NA, developmentHist2))|>
+  select(-multilingual_1:-multilingual_7_TEXT)|>
+  # recode major
+    mutate(major_recode = case_when(
+    str_detect(major, regex("psychology|cognitive neuroscience", ignore_case = TRUE)) ~ "Psychology",
+    str_detect(major, regex("business|management|finance|economics|administration", ignore_case = TRUE)) ~ "Business & Management",
+    str_detect(major, regex("engineering|computer science|technology", ignore_case = TRUE)) ~ "Engineering & Technology",
+    str_detect(major, regex("biomedical|clinical|nutrition|dietetics|health|pharmacy", ignore_case = TRUE)) ~ "Health & Biomedical Sciences",
+    str_detect(major, regex("media|sociology|social science|law|arts|cultural studies", ignore_case = TRUE)) ~ "Humanities & Social Sciences",
+    str_detect(major, regex("education|teaching|curriculum", ignore_case = TRUE)) ~ "Education",
+    str_detect(major, regex("biology|biochemistry|biotechnology|sciences", ignore_case = TRUE)) ~ "Sciences",
+    str_detect(major, regex("foundation|diploma|other", ignore_case = TRUE)) ~ "Foundation & Other",
+    TRUE ~ "Unspecified"
+  ))
+  
+#recode math instruction language at primary school
+  cleaned_demo <- cleaned_demo %>%
+  mutate(mathlanguage_recode = case_when(
+    str_detect(mathlanguage_1, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_1, regex("english|bi", ignore_case = TRUE)) ~ "Mandarin & English",
+    str_detect(mathlanguage_1, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_1, regex("malay|bahasa|bm", ignore_case = TRUE)) ~ "Mandarin & Malay",
+    str_detect(mathlanguage_1, regex("english|bi", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_1, regex("malay|bahasa|bm", ignore_case = TRUE)) ~ "English & Malay",
+    str_detect(mathlanguage_1, regex("mandarin|chinese", ignore_case = TRUE)) ~ "Mandarin",
+    str_detect(mathlanguage_1, regex("english|bi", ignore_case = TRUE)) ~ "English",
+    str_detect(mathlanguage_1, regex("malay|bahasa|bm", ignore_case = TRUE)) ~ "Malay",
+    str_detect(mathlanguage_1, regex("tamil", ignore_case = TRUE)) ~ "Tamil",
+    str_detect(mathlanguage_1, regex("arabic", ignore_case = TRUE)) ~ "Arabic",
+    TRUE ~ "Other"
+  ))
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(multiplylanguage_recode = case_when(
+    str_detect(multiplylanguage, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(multiplylanguage, regex("english|bahasa inggeris", ignore_case = TRUE)) ~ "Mandarin & English",
+    str_detect(multiplylanguage, regex("english|bahasa inggeris", ignore_case = TRUE)) & 
+    str_detect(multiplylanguage, regex("malay|bahasa malaysia", ignore_case = TRUE)) ~ "English & Malay",
+    str_detect(multiplylanguage, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(multiplylanguage, regex("malay|bahasa malaysia", ignore_case = TRUE)) ~ "Mandarin & Malay",
+    str_detect(multiplylanguage, regex("mandarin|chinese", ignore_case = TRUE)) ~ "Mandarin",
+    str_detect(multiplylanguage, regex("english|bahasa inggeris", ignore_case = TRUE)) ~ "English",
+    str_detect(multiplylanguage, regex("malay|bahasa malaysia", ignore_case = TRUE)) ~ "Malay",
+    str_detect(multiplylanguage, regex("arabic", ignore_case = TRUE)) ~ "Arabic",
+    str_detect(multiplylanguage, regex("urdu", ignore_case = TRUE)) ~ "Urdu",
+    TRUE ~ "Other"
+  ))
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(schooltype_recode = case_when(
+    str_detect(schooltype_1, regex("vernacular|SJK|chinese", ignore_case = TRUE)) & 
+    str_detect(schooltype_1, regex("chinese|cina|sjkc", ignore_case = TRUE)) ~ "Vernacular School (Chinese)",
+    str_detect(schooltype_1, regex("national|sekolah kebangsaan|SK", ignore_case = TRUE)) ~ "National School",
+    str_detect(schooltype_1, regex("vernacular|SJK|tamil", ignore_case = TRUE)) ~ "Vernacular School (Tamil)",
+    str_detect(schooltype_1, regex("private|international", ignore_case = TRUE)) ~ "Private School",
+    str_detect(schooltype_1, regex("religious", ignore_case = TRUE)) ~ "Religious School",
+    str_detect(schooltype_1, regex("homeschool", ignore_case = TRUE)) ~ "Homeschool",
+    TRUE ~ "Other"
+  ))
+
+
+# Learning Experiences: recode difficulties as factor
+cleaned_demo <- cleaned_demo %>%
+  mutate(across(
+    c(difficultiesmath, learnmultiplytable, peercomparison, peercomparison2, dyslexia, 
+      mathanxious, examanxious, memory, otherDifficulty),
+    ~ factor(if_else(. == "yes", 1, 0), levels = c(0, 1), labels = c("No", "Yes"))
+  ))
+
+# Change all the data type
+cleaned_demo <- cleaned_demo %>%
+  mutate(
+    ethnicity = factor(ethnicity, levels = c("Chinese", "Indian", "Malay", "Others", "Iban", "Kadazandusun")),
+    major_recode = factor(major_recode, levels = c("Education", "Psychology", "Humanities & Social Sciences", "Engineering & Technology", "Unspecified", "Business & Management", "Health & Biomedical Sciences", "Foundation & Other", "Sciences")),
+    mathlanguage_recode = factor(mathlanguage_recode, levels = c("Mandarin", "English", "Malay", "Mandarin & English", "English & Malay", "Tamil", "Other")),
+    multiplylanguage_recode = factor(multiplylanguage_recode, levels = c("Mandarin", "English", "Malay", "Arabic", "English & Malay", "Urdu", "Mandarin & English", "Other")),
+    schooltype_recode = factor(schooltype_recode, levels = c("Vernacular School (Chinese)", "National School", "Vernacular School (Tamil)", "Private School", "Religious School", "Homeschool", "Other"))
+  )
+
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(nativelanguage_recode = case_when(
+    str_detect(nativelanguage, regex("mandarin|cantonese|hokkien", 
+                                     ignore_case = TRUE)) ~ "Chinese Dialect",
+    str_detect(nativelanguage, regex("bahasa malaysia", ignore_case = TRUE)) ~ "Malay",
+    str_detect(nativelanguage, regex("english", ignore_case = TRUE)) ~ "English",
+    str_detect(nativelanguage, regex("dusunic", ignore_case = TRUE)) ~ "Indigenous Language",
+    str_detect(nativelanguage, regex("others", ignore_case = TRUE)) ~ "Other",
+    TRUE ~ "Other"
+  )) %>%
+  mutate(nativelanguage_recode = factor(nativelanguage_recode, 
+                                        levels = c("Chinese Dialect", 
+                                                   "Malay", "English", 
+                                                   "Indigenous Language", "Other")))
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(income = factor(income, levels = c(
+    "Less than RM 2,500",
+    "RM 2,500 - RM 3,169",
+    "RM 3,170 - RM 3,969",
+    "RM 3,970 - RM 4,849",
+    "RM 4,850 - RM 5,879",
+    "RM 5,880 - RM 7,099",
+    "RM 7,110 - RM 8,699",
+    "RM 8,700 - RM 10,959",
+    "RM 10,960 - RM 15,039",
+    "RM 15,039 or more"
+  ), ordered = TRUE))|>
+    mutate(
+    income_recode = factor(case_when(
+      income == "Less than RM 2,500" ~ 1,
+      income == "RM 2,500 - RM 3,169" ~ 2,
+      income == "RM 3,170 - RM 3,969" ~ 3,
+      income == "RM 3,970 - RM 4,849" ~ 4,
+      income == "RM 4,850 - RM 5,879" ~ 5,
+      income == "RM 5,880 - RM 7,099" ~ 6,
+      income == "RM 7,110 - RM 8,699" ~ 7,
+      income == "RM 8,700 - RM 10,959" ~ 8,
+      income == "RM 10,960 - RM 15,039" ~ 9,
+      income == "RM 15,039 or more" ~ 10
+    ), levels = 1:10, ordered = TRUE)
+  )
+
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(mathinstruction_secondary = case_when(
+    str_detect(mathlanguage_2, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_2, regex("english|bi", ignore_case = TRUE)) ~ "Mandarin & English",
+    str_detect(mathlanguage_2, regex("english|bi", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_2, regex("malay|bahasa malaysia|bm", ignore_case = TRUE)) ~ "English & Malay",
+    str_detect(mathlanguage_2, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_2, regex("malay|bahasa malaysia|bm", ignore_case = TRUE)) ~ "Mandarin & Malay",
+    str_detect(mathlanguage_2, regex("english|bi", ignore_case = TRUE)) ~ "English",
+    str_detect(mathlanguage_2, regex("malay|bahasa malaysia|bm", ignore_case = TRUE)) ~ "Malay",
+    str_detect(mathlanguage_2, regex("arabic", ignore_case = TRUE)) ~ "Arabic",
+    TRUE ~ "Other"
+  ))
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(mathinstruction_upper_secondary = case_when(
+    str_detect(mathlanguage_3, regex("mandarin|chinese", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_3, regex("english|bi", ignore_case = TRUE)) ~ "Mandarin & English",
+    str_detect(mathlanguage_3, regex("english|bi", ignore_case = TRUE)) & 
+    str_detect(mathlanguage_3, regex("malay|bahasa malaysia|bm", ignore_case = TRUE)) ~ "English & Malay",
+    str_detect(mathlanguage_3, regex("mandarin|chinese", ignore_case = TRUE)) ~ "Mandarin",
+    str_detect(mathlanguage_3, regex("english|bi", ignore_case = TRUE)) ~ "English",
+    str_detect(mathlanguage_3, regex("malay|bahasa malaysia|bm", ignore_case = TRUE)) ~ "Malay",
+    str_detect(mathlanguage_3, regex("arabic", ignore_case = TRUE)) ~ "Arabic",
+    str_detect(mathlanguage_3, regex("indonesian", ignore_case = TRUE)) ~ "Indonesian",
+    TRUE ~ "Other"
+  ))
+
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(schooltype_lower_secondary = case_when(
+        str_detect(schooltype_2, regex("vernacular|SMJK|chinese independent|independent high", ignore_case = TRUE)) & 
+    str_detect(schooltype_2, regex("chinese", ignore_case = TRUE)) ~ "Vernacular School (Chinese)",
+    str_detect(schooltype_2, regex("vernacular|SMJK|tamil", ignore_case = TRUE)) & 
+    str_detect(schooltype_2, regex("tamil", ignore_case = TRUE)) ~ "Vernacular School (Tamil)",
+    str_detect(schooltype_2, regex("national|sekolah kebangsaan|SMK|public", ignore_case = TRUE)) ~ "National School",
+    str_detect(schooltype_2, regex("international", ignore_case = TRUE)) ~ "International School",
+    str_detect(schooltype_2, regex("private", ignore_case = TRUE)) ~ "Private School",
+    str_detect(schooltype_2, regex("religious|agama", ignore_case = TRUE)) ~ "Religious School",
+    str_detect(schooltype_2, regex("homeschool", ignore_case = TRUE)) ~ "Homeschool",
+    str_detect(schooltype_2, regex("boarding", ignore_case = TRUE)) ~ "Boarding School",
+    TRUE ~ "Other"
+  ))
+
+cleaned_demo <- cleaned_demo %>%
+  mutate(schooltype_upper_secondary = case_when(
+        str_detect(schooltype_3, regex("vernacular|SMJK|chinese independent|independent high", ignore_case = TRUE)) & 
+    str_detect(schooltype_3, regex("chinese", ignore_case = TRUE)) ~ "Vernacular School (Chinese)",
+    str_detect(schooltype_3, regex("vernacular|SMJK|tamil", ignore_case = TRUE)) & 
+    str_detect(schooltype_3, regex("tamil", ignore_case = TRUE)) ~ "Vernacular School (Tamil)",
+    str_detect(schooltype_3, regex("national|sekolah kebangsaan|SMK|public", ignore_case = TRUE)) ~ "National School",
+    str_detect(schooltype_3, regex("international", ignore_case = TRUE)) ~ "International School",
+    str_detect(schooltype_3, regex("private", ignore_case = TRUE)) ~ "Private School",
+    str_detect(schooltype_3, regex("religious|agama", ignore_case = TRUE)) ~ "Religious School",
+    str_detect(schooltype_3, regex("boarding|berasrama penuh", ignore_case = TRUE)) ~ "Boarding School",
+    str_detect(schooltype_3, regex("homeschool", ignore_case = TRUE)) ~ "Homeschool",
+    TRUE ~ "Other"
+  ))
+
+
+# Demographics
+cleaned_demo <- cleaned_demo |>
+  mutate(
+    participant = as.factor(participant),
+    gender = as.factor(gender),
+    nationality = as.factor(nationality),
+    eduLevel = as.factor(eduLevel),
+    employment = as.factor(employment),
+    major = as.factor(major),
+    handedness = as.factor(handedness),
+    mathinstruction_secondary = as.factor(mathinstruction_secondary),
+    mathinstruction_upper_secondary = as.factor(mathinstruction_upper_secondary),
+    schooltype_lower_secondary = as.factor(schooltype_lower_secondary),
+    schooltype_upper_secondary = as.factor(schooltype_upper_secondary)
+  )|>
+  mutate(
+    Medicalhistory = factor(if_else(Medicalhistory == "Yes", 1, 0), levels = c(0, 1), labels = c("No", "Yes")),
+    developmentHist = factor(if_else(developmentHist == "Yes", 1, 0), levels = c(0, 1), labels = c("No", "Yes")),
+    
+    # Convert ParentsEdu into an ordered factor
+    ParentsEdu = factor(ParentsEdu,
+                        levels = c("No", "Yes, mother only", 
+                                   "Yes, father only", 
+                                   "Yes, both parents"),
+                        ordered = TRUE)
+  )
+
+cleaned_demo <- cleaned_demo|>
+  select(-nativelanguage:-schooltype_3)
+
+cleaned_demo <- cleaned_demo %>%
+  rename(self_rating_multiplication = rateownfluency_1) %>%
+  mutate(self_rating_multiplication = as.numeric(self_rating_multiplication))
+
+```
+
+### Recoding second languages known
+
+```{r}
+
+demo_lang <- demo |>
+  select(participant, multilingual_1 : multilingual_7_TEXT)|>
+    mutate(
+    multilingual_1 = if_else(multilingual_1_TEXT != "", multilingual_1, NA_character_),
+    multilingual_2 = if_else(multilingual_2_TEXT != "", multilingual_2, NA_character_),
+    multilingual_3 = if_else(multilingual_3_TEXT != "", multilingual_3, NA_character_),
+    multilingual_4 = if_else(multilingual_4_TEXT != "", multilingual_4, NA_character_),
+    multilingual_5 = if_else(multilingual_5_TEXT != "", multilingual_5, NA_character_),
+    multilingual_6 = if_else(multilingual_6_TEXT != "", multilingual_6, NA_character_),
+    multilingual_7 = if_else(multilingual_7_TEXT != "", multilingual_7, NA_character_)
+  )
+
+
+# Step 1: Pivot the multilingual score columns into a long format
+data_scores <- demo_lang %>%
+  pivot_longer(
+    cols = starts_with("multilingual_") & !ends_with("_TEXT"),  # Select only multilingual_X columns
+    names_to = "set",                                         
+    values_to = "L2_proficiencyScore"
+  ) %>%
+  mutate(set = str_remove(set, "multilingual_"))  |>
+  select(participant, set, L2_proficiencyScore)
+
+# Step 2: Pivot the multilingual language columns into a long format
+data_languages <- demo_lang %>%
+  pivot_longer(
+    cols = ends_with("_TEXT"),                                  # Select only multilingual_X_TEXT columns
+    names_to = "set",
+    values_to = "language2"
+  ) %>%
+  mutate(set = str_remove(set, "multilingual_")) |>
+  mutate(set = str_remove(set, "_TEXT")) |>
+  select(participant, set, language2)
+
+# Step 3: Join both long data frames by the `set` and participant identifier (if needed)
+language_long <- data_scores %>%
+  left_join(data_languages, by = c("participant", "set"))|>
+  filter(!is.na(L2_proficiencyScore))|>
+  mutate(L2_proficiencyScore = as.numeric(L2_proficiencyScore)) |>
+  # Step 4: Count languages meeting the proficiency threshold for each participant
+  group_by(participant) %>%
+  summarise(
+    num_languages_above_threshold = sum(L2_proficiencyScore >= 50, na.rm = TRUE),
+    avg_L2_proficiencyScore = mean(L2_proficiencyScore, na.rm = TRUE),
+    total_weighted_proficiency = sum(L2_proficiencyScore, na.rm = TRUE)
+  )
+
+
+```
+
+# Combine and save all
+
+```{r}
+
+final_df <- cleaned_demo|>
+  left_join(language_long, by = "participant")|>
+  write_csv("DATA_cleaned/demo_cleaned.csv")
+
+
+  
+```

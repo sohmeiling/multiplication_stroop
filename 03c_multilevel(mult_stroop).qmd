@@ -1,0 +1,582 @@
+---
+title: "Multilevel - multiplication stroop task"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(MuMIn)
+library(viridis) 
+```
+
+## Import Data
+
+```{r}
+#| message: false
+
+mult_stroop <- read_csv("DATA_cleaned/mult_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(multiplyCorr),
+         congruency = as.factor(physicalSize),
+         size = if_else(mult_answer < 25, "small-sized", "large-sized"),
+         operand_order = as.factor(orderOperand),
+         problem = as.factor(multliplyProblem),
+         log_rt = log10(multi_RT),
+         size = as.factor(size))|>
+  filter(orderOperand != 'tie')
+
+demo_screening <- read_csv("DATA_cleaned/combined_df.csv")|>
+  mutate(participant = as.factor(participant)) |>
+  mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE),
+         typing_centered = median_RT_correct_typing - mean(median_RT_correct_typing, 
+                                                           na.rm = TRUE))
+
+mag_summary <- read_csv("DATA_cleaned/mag_summary.csv")|>
+  mutate(participant = as.factor(participant))
+
+reduced_df <- demo_screening |>
+    inner_join(mag_summary, by = c('participant'))
+```
+
+## EDA
+
+```{r}
+#| message: false
+characteristics <- read_csv("multiplication_stimuli.csv")|>
+  rename(interference = "Interference group")|>
+  rename(order = "Presentation Order")
+
+## combine with the characteristics
+mult_stroop_df <- mult_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+  select(-Progress:-sd_RT_mult)|>
+  filter(correctness == TRUE)|>
+  ungroup()|>
+  inner_join(characteristics, by = c("multliplyProblem"))|>
+  filter(order != 'tie')|>
+    mutate(multliplyProblem = as.factor(multliplyProblem),
+         interference = factor(interference, 
+                                  levels = c("low interference", "high interference")))|>
+  select(participant, problem, log_rt, 
+         congruency, operand_order, size, interference,
+         fluency_centered, typing_centered)
+
+
+```
+
+## Inferential Analysis
+
+### RT
+
+#### Null model (without interactions in the random slope)
+
+```{r}
+mult_null <- lmer(log_rt ~ congruency + operand_order + 
+                  size + interference + fluency_centered +                                 
+                  typing_centered +
+                     (1 + size + interference | participant) + 
+                    (1  |problem), 
+                  data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_null)
+```
+
+Random slope and random intercept structures for the final model is:
+
+```{r}
+mult_m0 <- lmer(log_rt ~ congruency * size * interference * fluency_centered + 
+                  typing_centered +
+                     (1 + size + interference | participant) + 
+                    (1  |problem), 
+               data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m0)
+```
+
+```{r}
+anova(mult_m0, mult_null)
+
+performance::model_performance(mult_m0)
+performance::model_performance(mult_null)
+```
+
+#### Maximal model
+
+Don't run, takes too long and it doesn't converge due to high collinearity and operand_order
+
+```{r}
+# start with max model with log-transformed RT
+
+
+mult_m1 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered + typing_centered +
+                     (1 + congruency * operand_order * size * interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m1)
+
+```
+
+Singularity issue
+
+### Theoretical models
+
+H1: Modeling Automaticity and Multiplication Fluency in the Multiplication Verification Task
+
+#### Model 2
+
+```{r}
+# Hypothesis 1: Automaticity related to multiplication fluency
+model_auto_fluency <- lmer(log_rt ~ congruency * fluency_centered + typing_centered + 
+                           (1 + congruency | participant) + (1 | problem), 
+                           data = mult_stroop_df, 
+                           control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)))
+
+summary(model_auto_fluency)
+anova(mult_null, model_auto_fluency)
+```
+
+Rank-deficient
+
+```{r}
+summary(model_auto_fluency)$varcor
+
+performance::check_collinearity(model_auto_fluency)
+```
+
+#### Model 3
+
+```{r}
+
+model_auto_intent_fluency <- lmer(log_rt ~ congruency * size * interference * fluency_centered 
+                                  + typing_centered +
+                                  (1 + congruency * size * interference | participant) + 
+                                    (1 | problem),
+                                  data = mult_stroop_df,
+                                  control = lmerControl(optimizer = "bobyqa", 
+                                                        optCtrl = list(maxfun = 2e5)))
+
+
+summary(model_auto_intent_fluency)$varcor
+performance::check_collinearity(model_auto_intent_fluency)
+summary(model_auto_intent_fluency)
+```
+
+Likelihood test
+
+```{r}
+anova(mult_null, model_auto_intent_fluency)
+
+```
+
+#### Model 4
+
+Model: problem features (size and interference) moderated by multiplication fluency
+
+```{r}
+
+# H 3: Problem features moderated by multiplication fluency
+model_problem_fluency <- lmer(log_rt ~ size * interference * fluency_centered + 
+                                typing_centered +
+                              (1 + size * interference | participant) + 
+                                (1 | problem),
+                              data = mult_stroop_df,
+                              control = lmerControl(optimizer = "bobyqa", 
+                                                    optCtrl = list(maxfun = 2e5)))
+
+
+
+summary(model_problem_fluency)
+anova(mult_null, model_problem_fluency)
+```
+
+Model performance
+
+```{r}
+print("congruency + operand_order + size + interference + fluency_centered +               typing_centered")
+performance::model_performance(mult_null)
+
+print("congruency * fluency_centered + typing_centered")
+performance::model_performance(model_auto_fluency)
+
+print("congruency * size * interference * fluency_centered + typing_centered")
+performance::model_performance(model_auto_intent_fluency)
+
+print("size * interference * fluency_centered + typing_centered")
+performance::model_performance(model_problem_fluency)
+```
+
+#### Model 5
+
+```{r}
+
+# H 3: Problem features moderated by multiplication fluency
+model_fluency <- lmer(log_rt ~ congruency * size * interference * fluency_centered + 
+                                typing_centered +
+                              (1 + size * interference | participant) + 
+                                (1 | problem),
+                              data = mult_stroop_df,
+                              control = lmerControl(optimizer = "bobyqa", 
+                                                    optCtrl = list(maxfun = 2e5)))
+
+
+
+summary(model_fluency)
+performance::model_performance(model_fluency)
+anova(model_problem_fluency, model_fluency)
+```
+
+#### Model 6
+
+```{r}
+
+model_fluency2 <- lmer(log_rt ~ congruency * size * interference * fluency_centered +
+                         operand_order + typing_centered +
+                              (1 + size * interference | participant) + 
+                                (1 | problem),
+                              data = mult_stroop_df,
+                              control = lmerControl(optimizer = "bobyqa", 
+                                                    optCtrl = list(maxfun = 2e5)))
+
+
+
+summary(model_fluency2)
+performance::model_performance(model_fluency2)
+anova(model_problem_fluency, model_fluency2)
+summary(model_fluency2)$varcor
+```
+
+#### Model 7
+
+```{r}
+
+mult_m7 <- lmer(log_rt ~ congruency + operand_order* size * interference * fluency_centered +                       typing_centered +
+                     (1 + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m7)
+summary(mult_m7)$varcor
+performance::model_performance((mult_m7))
+```
+
+#### Model 8
+
+```{r}
+
+mult_m8 <- lmer(log_rt ~ congruency + operand_order* size * interference * fluency_centered +                       typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+
+summary(mult_m8)
+summary(mult_m8)$varcor
+anova(mult_m7, mult_m8)
+performance::model_performance((mult_m8))
+```
+
+#### Model 9
+
+```{r}
+
+mult_m9 <- lmer(log_rt ~ congruency * operand_order * fluency_centered + 
+                  size * interference * fluency_centered +                                 
+                  typing_centered +
+                     (1 + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m9)
+summary(mult_m9)$varcor
+```
+
+#### Model 10
+
+```{r}
+
+mult_m10 <- lmer(log_rt ~ congruency * fluency_centered + 
+                   operand_order * size * interference * fluency_centered +                   
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m10)
+summary(mult_m10)$varcor
+performance::model_performance(mult_m10)
+```
+
+#### Model 11
+
+```{r}
+
+mult_m11 <- lmer(log_rt ~ congruency * operand_order * fluency_centered + 
+                   size * interference * fluency_centered +                   
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m11)
+summary(mult_m11)$varcor
+performance::model_performance(mult_m11)
+```
+
+#### Model 12
+
+```{r}
+
+mult_m12 <- lmer(log_rt ~ congruency* size * interference *fluency_centered + 
+                   operand_order +                  
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m12)
+summary(mult_m12)$varcor
+performance::model_performance(mult_m12)
+```
+
+Model performance
+
+```{r}
+performance::model_performance(mult_m7)
+performance::model_performance(mult_m8)
+```
+
+## Post-hoc
+
+### Size x interference
+
+```{r}
+
+#emm_options(pbkrtest.limit = 19135)
+
+# Run emmeans - 
+emmeans_size <- emmeans(mult_null, ~ size)
+print(emmeans_size)
+pairs(emmeans_size)
+
+# Interaction of size x interference
+emmeans_size_int <- emmeans(mult_m0, ~ size * interference)
+print(emmeans_size_int)
+pairs(emmeans_size_int)
+
+```
+
+### Fluency x size
+
+```{r}
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between congruency and fluency at selected values of fluency_centered
+emmeans_size_fluency <- emmeans(mult_m0, ~ size | fluency_centered, 
+                                      at = list(fluency_centered = fluency_vals))
+print(emmeans_size_fluency)
+pairs(emmeans_size_fluency)
+```
+
+### Fluency x interference
+
+```{r}
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between congruency and fluency at selected values of fluency_centered
+emmeans_int_fluency <- emmeans(mult_m0, ~ interference | fluency_centered, 
+                                      at = list(fluency_centered = fluency_vals))
+print(emmeans_int_fluency)
+pairs(emmeans_int_fluency)
+```
+
+### Fluency x size x interference
+
+```{r}
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between size, interference, and fluency at selected values of fluency_centered
+emmeans_int_size_fluency <- emmeans(mult_m0, ~ size * interference | fluency_centered, 
+                               at = list(fluency_centered = fluency_vals))
+
+
+print(emmeans_int_size_fluency)
+pairs(emmeans_int_size_fluency)
+```
+
+## Data Viz
+
+### size x interference
+
+```{r}
+
+emmeans_df <- as.data.frame(emmeans_size_int)
+
+# Ensure 'size' is treated as a factor (if it's not already)
+emmeans_df$size <- factor(emmeans_df$size, levels = c("small-sized", "large-sized"))
+emmeans_df$interference <- factor(emmeans_df$interference)
+
+# Create the plot
+p <- ggplot(emmeans_df, aes(x = size, y = emmean, 
+                            group = interference, color = interference)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_viridis_d(option = "viridis", end = 0.8) +  # Apply color-blind friendly palette
+    geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) + 
+  labs(
+       x = "Problem Size", 
+       y = "Estimated Marginal Mean of Log Reaction Time",
+       color = "Interference") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+
+p 
+ggsave("figures/mult_size_int.png", plot = p, width = 8, height = 6, dpi = 300)
+```
+
+### Size x fluency
+
+```{r}
+emmeans_df_fluency <- as.data.frame(emmeans_size_fluency)
+
+fluency_size_mult <- ggplot(emmeans_df_fluency, aes(x = fluency_centered, y = emmean, color = size)) +
+  geom_line(aes(group = size), size = 1) +  # Lines for each congruency level
+  geom_point(size = 3) +  # Points at each estimate
+  scale_color_viridis_d(option = "viridis", end = 0.8) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) +  # Error bars
+  labs(x = "Fluency (Centered)", 
+       y = "Estimated Marginal Mean of log(RT)") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+fluency_size_mult
+ggsave("figures/fluency_size_mult.png", plot = fluency_size_mult, width = 8, height = 6)
+```
+
+### interference x fluency
+
+```{r}
+emmeans_df_fluency <- as.data.frame(emmeans_int_fluency)
+
+fluency_int_mult <- ggplot(emmeans_df_fluency, aes(x = fluency_centered, y = emmean, color = interference)) +
+  geom_line(aes(group = interference), size = 1) +  # Lines for each congruency level
+  geom_point(size = 3) +  # Points at each estimate
+  scale_color_viridis_d(option = "viridis", end = 0.8) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) +  # Error bars
+  labs(x = "Fluency (Centered)", 
+       y = "Estimated Marginal Mean of log(RT)") +
+    theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at top
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+fluency_int_mult
+ggsave("figures/ffluency_int_mult.png", plot = fluency_int_mult, width = 8, height = 6)
+```
+
+### size x interference x fluency
+
+```{r}
+
+# Convert the emmeans output to a DataFrame
+emmeans_df <- as.data.frame(emmeans_int_size_fluency)
+
+# Ensure 'size', 'interference', and 'fluency_centered' are treated as factors
+emmeans_df$size <- factor(emmeans_df$size, levels = c("small-sized", "large-sized"))
+emmeans_df$interference <- factor(emmeans_df$interference)
+emmeans_df$fluency_centered <- factor(emmeans_df$fluency_centered, levels = c(-1, 0, 1), 
+                                      labels = c("Low Fluency", "Average Fluency", "High Fluency"))
+
+# Create the interaction plot using ggplot2
+p <- ggplot(emmeans_df, aes(x = size, y = emmean, 
+                            group = interference, color = interference)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_viridis_d(option = "viridis", end = 0.8) +  # Apply color-blind friendly palette
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) + 
+  labs(
+    x = "Problem Size", 
+    y = "Estimated Marginal Mean of Log Reaction Time",
+    color = "Interference"
+  ) +
+  theme_classic(base_size = 12) +  # Simple, clean theme
+  theme(
+    text = element_text(family = "sans"),  # Sans-serif font
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Center-align title
+    axis.title = element_text(face = "bold"),  # Bold axis titles
+    legend.title = element_text(face = "bold"),  # Bold legend title
+    legend.position = "bottom",  # Legend at bottom
+    legend.background = element_blank(),  # Remove legend background
+    legend.key = element_blank(),  # Remove legend key background
+    axis.line = element_line(color = "black"),  # Axis lines
+    panel.grid = element_blank()  # Remove gridlines
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ fluency_centered, labeller = labeller(fluency_centered = label_value))  # Custom labeller to only show the label value
+
+
+p
+ggsave("figures/three-way_interaction.png", plot = p, width = 10, height = 6)
+```

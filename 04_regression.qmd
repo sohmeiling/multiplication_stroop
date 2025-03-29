@@ -1,0 +1,178 @@
+---
+title: "04_regression"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(MuMIn)
+```
+
+## Import Data
+
+```{r}
+#| message: false
+
+size_stroop <- read_csv("DATA_cleaned/size_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mag_stroop <- read_csv("DATA_cleaned/mag_stroop_df.csv") |>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mult_stroop <- read_csv("DATA_cleaned/mult_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(multiplyCorr),
+         congruency = as.factor(physicalSize),
+         size = if_else(mult_answer < 25, "small-sized", "large-sized"),
+         operand_order = as.factor(orderOperand),
+         problem = as.factor(multliplyProblem),
+         log_rt = log10(multi_RT))
+
+demo_screening <- read_csv("DATA_cleaned/combined_df.csv")|>
+  mutate(participant = as.factor(participant))|>
+  select(participant, total_solved_fluency)
+
+mag_summary <- read_csv("DATA_cleaned/mag_summary.csv")|>
+  mutate(participant = as.factor(participant))
+
+reduced_df <- demo_screening |>
+    inner_join(mag_summary, by = c('participant'))
+```
+
+## Data structure
+
+```{r}
+
+size_stroop_df <- size_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+  select(-Progress:-sd_RT_mult)|>
+  mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE))
+
+mag_stroop_df <- mag_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+    select(-Progress:-sd_RT_mult)|>
+    mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE))
+```
+
+## Automatic numerical processing
+
+In this study, **automatic numerical processing** was operationalized using the **numerical Stroop task**, which involved comparing the numerical values of two digits while ignoring their physical size. Automatic numerical processing refers to the extent to which the numerical value of a digit is processed involuntarily, even when it is irrelevant to the task. Thus, the automatic processing measure was derived from the difference in response times (RTs) between congruent and incongruent trials in this task, referred to as the **numerical Stroop effect**. Congruent trials featured digits with larger numerical values that were physically larger, while incongruent trials had larger numerical values but smaller physical sizes. A higher Stroop effect indicates greater interference from irrelevant numerical information during automatic processing. The difference in reaction times (RTs) between congruent and incongruent trials here reflects automatic interference from irrelevant physical size information.
+
+```{r}
+
+automatic <- mag_stroop |>
+  filter(congruency != 'neutral')|>
+  filter(correctness == TRUE)|>
+  group_by(participant, congruency)|>
+  summarise(meanRT = mean(rt))|>
+  pivot_wider(names_from = congruency, values_from = meanRT)|>
+  mutate(automatic_stroop_effect = incongruent - congruent)|>
+  select(participant, automatic_stroop_effect)
+
+```
+
+## Distance effect
+
+The **distance effect**, which reflects intentional numerical processing, was measured in the **magnitude comparison task**. Participants were asked to compare the numerical values of two digits presented side by side. The distance effect was calculated as the difference in RTs between trials where the numerical difference between the two digits was small (e.g., 1 or 2) versus large (e.g., 5). A larger distance effect suggests greater difficulty in intentionally processing smaller numerical differences, indicative of a less efficient intentional comparison process.
+
+```{r}
+
+distance <- mag_stroop |>
+  filter(correctness == TRUE)|>
+  group_by(participant, num_distance)|>
+  summarise(meanRT = mean(rt))|>
+  pivot_wider(names_from = num_distance, values_from = meanRT)|>
+  mutate(distance_effect_large = `1` - `5`,
+         distance_effect_intermediate = `2` - `5`)|>
+  select(participant, distance_effect_large, distance_effect_intermediate)
+
+```
+
+## Congruency effect
+
+The **congruency effect**, which captures inhibition, was measured in both the **size comparison** and **magnitude comparison tasks**. In the size comparison task, participants compared the physical sizes of digits, with congruent trials involving larger digits that were numerically larger and incongruent trials involving larger digits that were numerically smaller. In the magnitude comparison task, participants compared the numerical values of digits, with congruent trials featuring larger physical sizes for larger numerical values and incongruent trials showing the opposite. The congruency effect was derived by comparing the RTs between congruent and incongruent trials, with a higher congruency effect indicating greater difficulty inhibiting irrelevant information.
+
+```{r}
+
+congruency_size <- size_stroop |>
+  filter(correctness == TRUE)|>
+  filter(congruency != 'neutral')|>
+  group_by(participant, congruency)|>
+  summarise(meanRT = mean(rt))|>
+  pivot_wider(names_from = congruency, values_from = meanRT)|>
+  mutate(congruency_size_effect = incongruent - congruent)|>
+  select(participant, congruency_size_effect)
+  
+congruency_mag <- mag_stroop |>
+  filter(correctness == TRUE)|>
+  filter(congruency != 'neutral')|>
+  group_by(participant, congruency)|>
+  summarise(meanRT = mean(rt))|>
+  pivot_wider(names_from = congruency, values_from = meanRT)|>
+  mutate(congruency_mag_effect = incongruent - congruent)|>
+  select(participant, congruency_mag_effect)
+
+congruency <- rbind(size_stroop, mag_stroop)|>
+  filter(correctness == TRUE)|>
+  filter(congruency != 'neutral')|>
+  group_by(participant, congruency)|>
+  summarise(meanRT = mean(rt))|>
+  pivot_wider(names_from = congruency, values_from = meanRT)|>
+  mutate(congruency_effect = incongruent - congruent)|>
+  select(participant, congruency_effect)
+  
+```
+
+## Regression df
+
+```{r}
+
+combined_measures <- demo_screening |>
+  inner_join(automatic, by = c('participant')) |>
+  inner_join(distance, by = c('participant'))|>
+  inner_join(congruency_mag, by = c('participant')) |>
+  inner_join(congruency_size, by = c('participant'))|>
+  inner_join(congruency, by = c('participant'))
+```
+
+## Regression model
+
+Automatic vs intentional processing
+
+The dependent variable was multiplication fluency, while predictors included the numerical Stroop effect (automatic processing), distance effect (intentional processing), and congruency effect (inhibition) from both size and magnitude comparison tasks.
+
+```{r}
+
+processing_model <- lm(total_solved_fluency ~ automatic_stroop_effect + distance_effect_large +
+                         distance_effect_intermediate + congruency_size_effect, 
+                       data = combined_measures)
+
+summary(processing_model)
+performance::check_model(processing_model)
+
+performance::check_collinearity(processing_model)
+```

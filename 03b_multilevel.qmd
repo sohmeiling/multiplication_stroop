@@ -1,0 +1,371 @@
+---
+title: "Multilevel - multiplication stroop task"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(MuMIn)
+library(viridis) 
+```
+
+## Import Data
+
+```{r}
+#| message: false
+
+mult_stroop <- read_csv("DATA_cleaned/mult_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.logical(multiplyCorr),
+         congruency = as.factor(physicalSize),
+         size = if_else(mult_answer < 25, "small-sized", "large-sized"),
+         operand_order = as.factor(orderOperand),
+         problem = as.factor(multliplyProblem),
+         log_rt = log10(multi_RT),
+         size = as.factor(size))|>
+  filter(orderOperand != 'tie')
+
+demo_screening <- read_csv("DATA_cleaned/combined_df.csv")|>
+  mutate(participant = as.factor(participant)) |>
+  mutate(fluency = as.numeric(total_solved_fluency))|>
+  mutate(fluency_centered = fluency - mean(fluency, na.rm = TRUE),
+         typing_centered = median_RT_correct_typing - mean(median_RT_correct_typing, 
+                                                           na.rm = TRUE))
+
+mag_summary <- read_csv("DATA_cleaned/mag_summary.csv")|>
+  mutate(participant = as.factor(participant))
+
+reduced_df <- demo_screening |>
+    inner_join(mag_summary, by = c('participant'))
+```
+
+## EDA
+
+```{r}
+#| message: false
+characteristics <- read_csv("multiplication_stimuli.csv")|>
+  rename(interference = "Interference group")|>
+  rename(order = "Presentation Order")
+
+## combine with the characteristics
+mult_stroop_df <- mult_stroop|>
+  inner_join(demo_screening, by = c('participant'))|>
+  select(-Progress:-sd_RT_mult)|>
+  filter(correctness == TRUE)|>
+  ungroup()|>
+  inner_join(characteristics, by = c("multliplyProblem"))|>
+  filter(order != 'tie')|>
+    mutate(multliplyProblem = as.factor(multliplyProblem),
+         interference = factor(interference, 
+                                  levels = c("low interference", "high interference")))
+
+
+```
+
+## Inferential Analysis
+
+### RT
+
+#### Null model (without random slope)
+
+```{r}
+mult_null <- lmer(log_rt ~ congruency + operand_order + 
+                  size + interference + fluency_centered +                                 
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_null)
+```
+
+Model performance
+
+```{r}
+performance::model_performance(mult_null)
+performance::check_collinearity(mult_null)
+```
+
+#### Maximal model
+
+```{r}
+# start with max model with log-transformed RT
+
+
+mult_m1 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered + typing_centered +
+                     (1 + congruency * operand_order * size * interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m1)
+
+```
+
+Singularity issue
+
+### Simplified models
+
+#### Model 2
+
+```{r}
+mult_m2 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered +                       typing_centered +
+                     (1 + congruency * operand_order * size * interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m2)
+
+```
+
+Rank-deficient
+
+```{r}
+summary(mult_m2)$varcor
+
+performance::check_collinearity(mult_m2)
+```
+
+#### Model 3
+
+```{r}
+mult_m3 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered +                       typing_centered +
+                     (1 + congruency + operand_order + size + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m3)$varcor
+```
+
+#### Model 4
+
+```{r}
+
+mult_m4 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered +                       typing_centered +
+                     (1 + congruency + operand_order + size + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m4)$varcor
+```
+
+#### Model 5
+
+```{r}
+
+mult_m5 <- lmer(log_rt ~ congruency * operand_order * size * interference * fluency_centered +                       typing_centered +
+                     (1 + congruency + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m5)$varcor
+```
+
+#### Model 6
+
+```{r}
+
+mult_m6 <- lmer(log_rt ~ congruency * operand_order* size * interference * fluency_centered +                       typing_centered +
+                     (1 + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+
+summary(mult_m6)$varcor
+```
+
+#### Model 7
+
+```{r}
+
+mult_m7 <- lmer(log_rt ~ congruency + operand_order* size * interference * fluency_centered +                       typing_centered +
+                     (1 + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m7)
+summary(mult_m7)$varcor
+performance::model_performance((mult_m7))
+```
+
+#### Model 8
+
+```{r}
+
+mult_m8 <- lmer(log_rt ~ congruency + operand_order* size * interference * fluency_centered +                       typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+
+summary(mult_m8)
+summary(mult_m8)$varcor
+anova(mult_m7, mult_m8)
+performance::model_performance((mult_m8))
+```
+
+#### Model 9
+
+```{r}
+
+mult_m9 <- lmer(log_rt ~ congruency * operand_order * fluency_centered + 
+                  size * interference * fluency_centered +                                 
+                  typing_centered +
+                     (1 + interference || participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m9)
+summary(mult_m9)$varcor
+```
+
+#### Model 10
+
+```{r}
+
+mult_m10 <- lmer(log_rt ~ congruency * fluency_centered + 
+                   operand_order * size * interference * fluency_centered +                   
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m10)
+summary(mult_m10)$varcor
+performance::model_performance(mult_m10)
+```
+
+#### Model 11
+
+```{r}
+
+mult_m11 <- lmer(log_rt ~ congruency * operand_order * fluency_centered + 
+                   size * interference * fluency_centered +                   
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m11)
+summary(mult_m11)$varcor
+performance::model_performance(mult_m11)
+```
+
+#### Model 12
+
+```{r}
+
+mult_m12 <- lmer(log_rt ~ congruency* size * interference *fluency_centered + 
+                   operand_order +                  
+                  typing_centered +
+                     (1 + interference | participant) + 
+                    (1|problem), data = mult_stroop_df, 
+                   control = lmerControl(optimizer = "bobyqa", 
+                                         optCtrl = list(maxfun = 2e5)))
+
+summary(mult_m12)
+summary(mult_m12)$varcor
+performance::model_performance(mult_m12)
+```
+
+Model performance
+
+```{r}
+performance::model_performance(mult_m7)
+performance::model_performance(mult_m8)
+```
+
+## Post-hoc
+
+### Size x distance
+
+```{r}
+
+emm_options(pbkrtest.limit = 100000)
+
+# Run emmeans - 
+emmeans_size <- emmeans(mult_m12, ~ size)
+print(emmeans_size)
+pairs(emmeans_size)
+
+# Interaction effects
+emmeans_congruency_numdist <- emmeans(mult_m5, ~ congruency * num_distance)
+print(emmeans_congruency_numdist)
+
+# Pairwise comparisons
+pairs(emmeans_congruency_numdist)
+
+
+```
+
+### Fluency x size
+
+```{r}
+emm_options(pbkrtest.limit = 100000)
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between congruency and fluency at selected values of fluency_centered
+emmeans_size_fluency <- emmeans(mult_m12, ~ size | fluency_centered, 
+                                      at = list(fluency_centered = fluency_vals))
+print(emmeans_size_fluency)
+pairs(emmeans_size_fluency)
+```
+
+### Fluency x interference
+
+```{r}
+emm_options(pbkrtest.limit = 100000)
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between congruency and fluency at selected values of fluency_centered
+emmeans_int_fluency <- emmeans(mult_m12, ~ interference | fluency_centered, 
+                                      at = list(fluency_centered = fluency_vals))
+print(emmeans_int_fluency)
+pairs(emmeans_int_fluency)
+```
+
+### Fluency x size x interference
+
+```{r}
+emm_options(pbkrtest.limit = 19135)
+
+# Specifying fluency-centered at -1 SD, mean (0), and +1 SD for fluency
+fluency_vals <- c(-1, 0, 1)  
+
+# Interaction between size, interference, and fluency at selected values of fluency_centered
+emmeans_int_size_fluency <- emmeans(mult_m12, ~ size * interference | fluency_centered, 
+                               at = list(fluency_centered = fluency_vals))
+
+
+print(emmeans_int_size_fluency)
+pairs(emmeans_int_fluency)
+```
+
+## Data Viz

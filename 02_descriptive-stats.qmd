@@ -1,0 +1,224 @@
+---
+title: "Data Cleaning"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(gtsummary)
+library(Hmisc)
+library(broom)
+library(huxtable)
+library(correlation)
+library(psych)
+```
+
+## Import Data
+
+```{r}
+#| message: false
+#| 
+size_stroop <- read_csv("DATA_cleaned/size_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.numeric(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mag_stroop <- read_csv("DATA_cleaned/mag_stroop_df.csv") |>
+  mutate(participant = as.factor(participant),
+         correctness = as.numeric(correctness),
+         congruency = as.factor(congruency),
+         num_distance = as.factor(num_distance),
+         problem = as.factor(problem),
+         log_rt = log10(rt))
+
+mult_stroop <- read_csv("DATA_cleaned/mult_stroop_df.csv")|>
+  mutate(participant = as.factor(participant),
+         correctness = as.numeric(multiplyCorr),
+         congruency = as.factor(physicalSize),
+         size = if_else(mult_answer < 25, "small-sized", "large-sized"),
+         operand_order = as.factor(orderOperand),
+         problem = as.factor(multliplyProblem),
+         log_rt = log10(multi_RT))
+
+demo_screening <- read_csv("DATA_cleaned/combined_df.csv")|>
+  mutate(participant = as.factor(participant))
+
+mag_summary <- read_csv("DATA_cleaned/mag_summary.csv")|>
+  mutate(participant = as.factor(participant))
+
+reduced_df <- demo_screening |>
+    left_join(mag_summary, by = c('participant'))
+
+
+```
+
+## Characteristics of participants
+
+### Age
+
+```{r}
+
+print('age mean is') 
+mean(demo_screening$age)
+
+print('sd age is')
+sd(demo_screening$age)
+```
+
+Summary, total participants is 118, after adding in the mag_summary, total participants is 102, reduced by 16 participants.
+
+```{r}
+
+table1 <- demo_screening|>
+  select(-participant, -date, -Progress, -RecordedDate, -medicalHistory2,
+         -developmentHist2, -peercomparison2, -otherDifficulty_1_TEXT,
+         -date_of_birth, -major)|>
+  tbl_summary(
+      statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2,
+    missing_text = "(Missing)"
+  )
+
+table1 |>
+  as_hux_table() |> 
+  quick_xlsx("DATA_cleaned/summary_table.csv")
+  
+```
+
+### Typing Speed
+
+```{r}
+
+print('median typing')
+mean(reduced_df$median_RT_correct_typing)
+print('sd typing')
+sd(reduced_df$median_RT_correct_typing)
+print('accuracy - typing')
+mean(reduced_df$percentage_accuracy_typing)
+sd(reduced_df$percentage_accuracy_typing)
+```
+
+### Multiplication Fluency
+
+```{r}
+
+print('mean fluency')
+mean(reduced_df$median_RT_fluency)
+print('sd fluency')
+sd(reduced_df$median_RT_fluency)
+print('Number of problems solved - fluency')
+mean(reduced_df$total_solved_fluency)
+sd(reduced_df$total_solved_fluency)
+
+print('range')
+range(reduced_df$total_solved_fluency)
+```
+
+### Response speed
+
+```{r}
+print('mean speed')
+mean(reduced_df$median_RT_speed)
+print('sd speed')
+sd(reduced_df$median_RT_speed)
+print('accuracy - speed')
+mean(reduced_df$accuracy_rate_speed)
+sd(reduced_df$accuracy_rate_speed)
+
+```
+
+### Physical size Stroop
+
+```{r}
+
+print('mean size stroop')
+mean(reduced_df$median_RT_size)
+print('sd size stroop')
+sd(reduced_df$median_RT_size)
+
+print('accuracy - size stroop')
+mean(reduced_df$accuracy_rate_size)
+sd(reduced_df$accuracy_rate_size)
+```
+
+### Magnitude Stroop
+
+```{r}
+
+print('mean magnitude stroop')
+mean(reduced_df$median_RT_mag, na.rm = TRUE)
+print('sd magnitude stroop')
+sd(reduced_df$median_RT_mag, na.rm = TRUE)
+
+print('accuracy - magnitude stroop')
+mean(reduced_df$accuracy_rate_mag, na.rm = TRUE)
+sd(reduced_df$accuracy_rate_mag, na.rm = TRUE)
+```
+
+### Multiplication Stroop
+
+```{r}
+
+print('mean multiplication stroop')
+mean(reduced_df$median_RT_mult)
+print('sd multiplication stroop')
+sd(reduced_df$median_RT_mult)
+
+print('accuracy - multiplication stroop')
+mean(reduced_df$accuracy_rate_mult)
+sd(reduced_df$accuracy_rate_mult)
+```
+
+## Correlation - Exploratory
+
+### Age
+
+```{r}
+
+# Perform the Pearson correlation test
+cor_test_result <- cor.test(
+  x = demo_screening$age,
+  y = demo_screening$total_solved_fluency,
+  method = "pearson",
+  conf.level = 0.95
+)
+
+# View the results
+print(cor_test_result)
+
+```
+
+### Task correlation
+
+```{r}
+
+corr_df <- reduced_df|>
+  select(total_solved_fluency, median_RT_fluency,
+         percentage_accuracy_typing, median_RT_correct_typing,
+         accuracy_rate_speed, median_RT_speed,
+         accuracy_rate_size, median_RT_size,
+         accuracy_rate_mag, median_RT_mag,
+         total_solved_mult, median_RT_mult)
+```
+
+Correlation matrix
+
+```{r}
+correlation_matrix <- rcorr(as.matrix(corr_df), type = "pearson")
+
+
+print(correlation_matrix$r)  # Correlation coefficients
+print(correlation_matrix$P)  # P-values
+```
